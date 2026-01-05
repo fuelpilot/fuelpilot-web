@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top">
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: Arial, sans-serif; padding: 14px; }
@@ -178,11 +178,16 @@
   </div>
 
 <script>
+  // === BACKEND API (Apps Script Web App) ===
+  const API_BASE = "https://script.google.com/macros/s/AKfycbwxdaZgyn2do5rCTsfo-8Ocb6NGpqBMkRnFWffQQq4EO9JY_2CmzkyCKB-cvpHSluUK/exec";
+
   const ACC_MAX_TO_USE_M = 500;
+
   let mode = "SPESA_FISSA";
   let fuelMode = "COMMERCIALE";
   let commAll = [];
   let famAll = [];
+
   window.__gpsMeta = { localita:"", provincia:"", regione:"", formatted:"" };
 
   function normText(v){
@@ -242,10 +247,30 @@
     });
   }
 
+  async function apiGet_(params){
+    const url = API_BASE + "?" + new URLSearchParams(params).toString();
+    const r = await fetch(url, { method: "GET" });
+    const j = await r.json();
+    if (j && j.error) throw new Error(j.error);
+    return j;
+  }
+
+  async function apiPost_(payload){
+    const r = await fetch(API_BASE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    if (j && j.error) throw new Error(j.error);
+    return j;
+  }
+
   function loadFuelLists(){
     document.getElementById("fuelErr").innerText = "Carico carburanti...";
-    google.script.run
-      .withSuccessHandler((res) => {
+
+    apiGet_({ action: "fuelListsIT" })
+      .then((res) => {
         commAll = res?.commercial || [];
         famAll  = res?.family || [];
         document.getElementById("fuelErr").innerText = "";
@@ -253,10 +278,9 @@
         const sel = document.getElementById("selectComm");
         if (sel.options.length) { sel.selectedIndex=0; onPickComm(); }
       })
-      .withFailureHandler((e) => {
+      .catch((e) => {
         document.getElementById("fuelErr").innerText = (e && e.message) ? e.message : String(e);
-      })
-      .getFuelLists_IT();
+      });
   }
 
   function renderLists(){
@@ -323,17 +347,17 @@
         if (acc > ACC_MAX_TO_USE_M){
           document.getElementById("gpsErr").innerText =
             `Posizione troppo imprecisa (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`;
+          return; // STOP: non facciamo reverse geocode su dato impreciso
         }
 
-        google.script.run
-          .withSuccessHandler((r) => {
+        apiGet_({ action:"reverseGeocodeIT", lat:String(lat), lon:String(lon) })
+          .then((r) => {
             window.__gpsMeta = r || { localita:"", provincia:"", regione:"", formatted:"" };
             document.getElementById("gpsAddr").innerText = "Indirizzo: " + (r.formatted || "—");
           })
-          .withFailureHandler(() => {
+          .catch(() => {
             document.getElementById("gpsAddr").innerText = "Indirizzo: (non disponibile)";
-          })
-          .reverseGeocode_IT(lat, lon);
+          });
       },
       (err) => {
         document.getElementById("gpsErr").innerText = "GPS negato/non disponibile: " + err.message;
@@ -359,7 +383,6 @@
       return;
     }
 
-    // fallback carburante selezionato (se backend non lo manda)
     const selectedFuel = document.getElementById("carburante_key").value || "";
 
     res.results.forEach(r => {
@@ -388,13 +411,11 @@
         ? `<div class="muted" style="margin-top:2px;"><b>Tipo impianto:</b> ${r.gestore_short}</div>`
         : "";
 
-      // ✅ QUI: indirizzo + località + provincia_sigla
       const loc = (r.localita && String(r.localita).trim()) ? String(r.localita).trim() : "";
       const sigla = (r.provincia_sigla && String(r.provincia_sigla).trim()) ? String(r.provincia_sigla).trim() : "";
       const locSuffix = loc ? (" — " + loc + (sigla ? " (" + sigla + ")" : "")) : (sigla ? (" (" + sigla + ")") : "");
 
       div.innerHTML = `
-        <!-- Riga 1: rank + bandiera + carburante -->
         <div style="display:flex; gap:10px; align-items:baseline;">
           <div style="font-weight:700;">#${r.rank}</div>
           <div style="flex:1;">
@@ -402,13 +423,10 @@
           </div>
         </div>
 
-        <!-- Riga 2: indirizzo + località (sigla provincia) -->
         <div style="margin-top:4px;">${r.indirizzo || ""}${locSuffix}</div>
 
-        <!-- Riga 3: tipo impianto -->
         ${tipoLine}
 
-        <!-- KPI row -->
         <div style="margin-top:8px;">
           ${prezzoPill}
           ${distPill}
@@ -416,12 +434,10 @@
           ${saving}
         </div>
 
-        <!-- Costi (small) -->
         <div class="muted" style="margin-top:6px;">
           Totale: <b>${Number(r.costo_totale).toFixed(2)}€</b> (tragitto ${Number(r.costo_tragitto).toFixed(2)}€)
         </div>
 
-        <!-- Navigazione -->
         <div class="row" style="margin-top:8px;">
           <a href="${r.nav_google}" target="_blank" rel="noopener"><button>Naviga (Maps)</button></a>
           <a href="${r.nav_waze}" target="_blank" rel="noopener"><button>Naviga (Waze)</button></a>
@@ -497,16 +513,15 @@
       benchmark_scope
     };
 
-    google.script.run
-      .withSuccessHandler((res) => {
+    apiPost_({ action: "submitWizard", payload })
+      .then((res) => {
         document.getElementById("status").innerText = "";
         renderResults(res);
       })
-      .withFailureHandler((e) => {
+      .catch((e) => {
         document.getElementById("status").innerText = "";
         document.getElementById("error").innerText = (e && e.message) ? e.message : String(e);
-      })
-      .submitWizard(payload);
+      });
   }
 </script>
 </body>
