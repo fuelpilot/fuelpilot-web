@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; padding: 14px; }
+    h2 { margin: 6px 0 12px; }
+    .card { border: 1px solid #ddd; border-radius: 14px; padding: 12px; margin: 10px 0; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    label { display:block; font-weight: 700; margin-bottom: 6px; }
+    input, select { padding: 10px; border-radius: 10px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; }
+    button.primary { background:#111; border-color:#111; color:#fff; }
+    button.sel { background:#2b6cff; border-color:#2b6cff; color:#fff; }
+    .muted { color:#666; font-size: 12px; }
+    .err { color:#b00020; font-weight: 700; margin-top: 8px; }
+    .hidden { display:none; }
+    .pill { display:inline-block; padding: 4px 8px; border-radius: 999px; background:#eee; margin-right:6px; font-size:12px; }
+    .result { border-top:1px solid #eee; padding-top:10px; margin-top:10px; }
+    a { text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h2>Fuel Pilot — Wizard</h2>
+
+  <!-- AUTH -->
+  <div class="card">
+    <label>Email</label>
+    <input id="email" type="email" placeholder="nome@dominio.com" />
+    <div class="muted">Whitelist su <b>ALLOWED_USERS</b>. Note contiene <b>UNLIMITED</b> = accesso illimitato gratis.</div>
+  </div>
+
+  <!-- COUNTRY + RADIUS -->
+  <div class="card">
+    <div class="row">
+      <div style="flex:1; min-width:140px;">
+        <label>Paese</label>
+        <select id="country">
+          <option value="IT" selected>IT</option>
+          <option value="ES">ES</option>
+          <option value="FR">FR</option>
+        </select>
+        <div class="muted">Per ora engine completo: IT. ES/FR li agganciamo dopo.</div>
+      </div>
+      <div style="flex:1; min-width:140px;">
+        <label>Raggio (km)</label>
+        <input id="radius_km" type="number" value="10" min="1" max="50" />
+      </div>
+    </div>
+  </div>
+
+  <!-- POSITION -->
+  <div class="card">
+    <label>Posizione</label>
+    <div class="row" style="margin-top:8px;">
+      <button id="btnGPS" class="sel" onclick="setLocMode('GPS')">📍 Rileva posizione</button>
+      <button id="btnADDR" onclick="setLocMode('ADDRESS')">✍️ Scrivi indirizzo</button>
+    </div>
+
+    <div id="gpsBox" style="margin-top:10px;">
+      <button class="primary" onclick="getGPS()">📍 Rileva</button>
+      <div class="muted" id="gpsInfo">Nessuna posizione ancora.</div>
+      <div class="muted" id="gpsAddr">Indirizzo: —</div>
+      <div class="err" id="gpsErr"></div>
+      <div class="muted">Se sei su PC/in casa: usa “Scrivi indirizzo” (più affidabile).</div>
+    </div>
+
+    <div id="addrBox" class="hidden" style="margin-top:10px;">
+      <label>Indirizzo</label>
+      <input id="addr" placeholder="Via..., n°" />
+      <div class="row" style="margin-top:8px;">
+        <div style="flex:1; min-width:140px;">
+          <label>CAP</label>
+          <input id="cap" placeholder="70021" />
+        </div>
+        <div style="flex:2; min-width:180px;">
+          <label>Località</label>
+          <input id="city" placeholder="Acquaviva delle Fonti" />
+        </div>
+      </div>
+      <div class="err" id="addrErr"></div>
+      <div class="muted">Useremo l’indirizzo per ottenere lat/lon (geocoding).</div>
+    </div>
+
+    <input type="hidden" id="loc_mode" value="GPS" />
+    <input type="hidden" id="lat0" />
+    <input type="hidden" id="lon0" />
+    <input type="hidden" id="acc_m" />
+  </div>
+
+  <!-- FUEL -->
+  <div class="card">
+    <label>Carburante</label>
+    <div class="muted">Default: <b>nome commerciale</b>. Se sei esperto puoi scegliere la <b>Family</b>.</div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="btnComm" class="sel" onclick="setFuelMode('COMMERCIALE')">Commerciale</button>
+      <button id="btnFam" onclick="setFuelMode('FAMILY')">Family (esperto)</button>
+    </div>
+
+    <div id="boxComm" style="margin-top:10px;">
+      <label>Cerca</label>
+      <input id="searchComm" placeholder="es. metano / gasolio..." oninput="filterComm()" />
+      <label style="margin-top:8px;">Seleziona</label>
+      <select id="selectComm" size="6" onchange="onPickComm()"></select>
+    </div>
+
+    <div id="boxFam" class="hidden" style="margin-top:10px;">
+      <label>Cerca</label>
+      <input id="searchFam" placeholder="es. benzina / gasolio..." oninput="filterFam()" />
+      <label style="margin-top:8px;">Seleziona</label>
+      <select id="selectFam" size="6" onchange="onPickFam()"></select>
+    </div>
+
+    <div class="err" id="fuelErr"></div>
+
+    <input type="hidden" id="carburante_mode" value="COMMERCIALE" />
+    <input type="hidden" id="carburante_key" value="" />
+  </div>
+
+  <!-- MODE -->
+  <div class="card">
+    <label>Modalità rifornimento</label>
+    <div class="row" style="margin-top:8px;">
+      <button id="btnSpesa" class="sel" onclick="setMode('SPESA_FISSA')">Spesa fissa</button>
+      <button id="btnPieno" onclick="setMode('PIENO')">Pieno</button>
+    </div>
+
+    <div id="boxSpesa" style="margin-top:10px;">
+      <label>Importo</label>
+      <div class="row" style="margin-top:8px;">
+        <button id="b10" onclick="setImporto(10)">10€</button>
+        <button id="b20" class="sel" onclick="setImporto(20)">20€</button>
+        <button id="b50" onclick="setImporto(50)">50€</button>
+        <button id="b100" onclick="setImporto(100)">100€</button>
+      </div>
+      <div class="muted">Selezionato: <b><span id="impSel">20</span>€</b></div>
+      <input type="hidden" id="importo_euro" value="20" />
+    </div>
+
+    <div id="boxPieno" class="hidden" style="margin-top:10px;">
+      <label>Capacità serbatoio (L o kg)</label>
+      <input id="capacita_serbatoio" type="number" placeholder="es. 45" />
+
+      <label style="margin-top:8px;">Km residui autonomia</label>
+      <input id="km_residui" type="number" placeholder="es. 120" />
+
+      <label style="margin-top:8px;">Consumo (L/100km)</label>
+      <input id="consumo_l_100km" type="number" value="6.5" step="0.1" />
+    </div>
+  </div>
+
+  <!-- BENCHMARK -->
+  <div class="card">
+    <label>Benchmark per saving</label>
+    <div class="row" style="margin-top:8px;">
+      <button id="benchPAESE" onclick="setBenchmark('PAESE')">Paese</button>
+      <button id="benchREGIONE" class="sel" onclick="setBenchmark('REGIONE')">Regione</button>
+      <button id="benchPROVINCIA" onclick="setBenchmark('PROVINCIA')">Provincia</button>
+    </div>
+    <div class="muted">Saving = (prezzo medio benchmark − prezzo stazione) × litri riforniti.</div>
+    <input type="hidden" id="benchmark_scope" value="REGIONE" />
+  </div>
+
+  <!-- SUBMIT -->
+  <div class="card">
+    <button class="primary" style="width:100%;" onclick="submit()">Calcola</button>
+    <div class="muted" id="status" style="margin-top:8px;"></div>
+    <div class="err" id="error"></div>
+  </div>
+
+  <!-- RESULTS -->
+  <div class="card hidden" id="resultsCard">
+    <h3>Risultati</h3>
+    <div class="muted" id="metaLine"></div>
+    <div id="results"></div>
+  </div>
+
+<script>
+  const ACC_MAX_TO_USE_M = 500;
+  let mode = "SPESA_FISSA";
+  let fuelMode = "COMMERCIALE";
+  let commAll = [];
+  let famAll = [];
+  window.__gpsMeta = { localita:"", provincia:"", regione:"", formatted:"" };
+
+  function normText(v){
+    return String(v ?? "")
+      .trim().toLowerCase()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ");
+  }
+
+  window.onload = () => { loadFuelLists(); };
+
+  function setLocMode(m){
+    document.getElementById("loc_mode").value = m;
+    document.getElementById("btnGPS").classList.toggle("sel", m==="GPS");
+    document.getElementById("btnADDR").classList.toggle("sel", m==="ADDRESS");
+    document.getElementById("gpsBox").classList.toggle("hidden", m!=="GPS");
+    document.getElementById("addrBox").classList.toggle("hidden", m!=="ADDRESS");
+    document.getElementById("gpsErr").innerText = "";
+    document.getElementById("addrErr").innerText = "";
+  }
+
+  function setFuelMode(m){
+    fuelMode = m;
+    document.getElementById("carburante_mode").value = m;
+    document.getElementById("btnComm").classList.toggle("sel", m==="COMMERCIALE");
+    document.getElementById("btnFam").classList.toggle("sel", m==="FAMILY");
+    document.getElementById("boxComm").classList.toggle("hidden", m!=="COMMERCIALE");
+    document.getElementById("boxFam").classList.toggle("hidden", m!=="FAMILY");
+    if (m==="COMMERCIALE") {
+      const sel = document.getElementById("selectComm");
+      if (sel.options.length) { sel.selectedIndex = 0; onPickComm(); }
+    } else {
+      const sel = document.getElementById("selectFam");
+      if (sel.options.length) { sel.selectedIndex = 0; onPickFam(); }
+    }
+  }
+
+  function setMode(m){
+    mode = m;
+    document.getElementById("btnSpesa").classList.toggle("sel", m==="SPESA_FISSA");
+    document.getElementById("btnPieno").classList.toggle("sel", m==="PIENO");
+    document.getElementById("boxSpesa").classList.toggle("hidden", m!=="SPESA_FISSA");
+    document.getElementById("boxPieno").classList.toggle("hidden", m!=="PIENO");
+  }
+
+  function setImporto(v){
+    document.getElementById("importo_euro").value = String(v);
+    document.getElementById("impSel").innerText = String(v);
+    ["b10","b20","b50","b100"].forEach(id => document.getElementById(id).classList.remove("sel"));
+    document.getElementById("b"+v).classList.add("sel");
+  }
+
+  function setBenchmark(scope){
+    document.getElementById("benchmark_scope").value = scope;
+    ["PAESE","REGIONE","PROVINCIA"].forEach(s => {
+      document.getElementById("bench"+s).classList.toggle("sel", s===scope);
+    });
+  }
+
+  function loadFuelLists(){
+    document.getElementById("fuelErr").innerText = "Carico carburanti...";
+    google.script.run
+      .withSuccessHandler((res) => {
+        commAll = res?.commercial || [];
+        famAll  = res?.family || [];
+        document.getElementById("fuelErr").innerText = "";
+        renderLists();
+        const sel = document.getElementById("selectComm");
+        if (sel.options.length) { sel.selectedIndex=0; onPickComm(); }
+      })
+      .withFailureHandler((e) => {
+        document.getElementById("fuelErr").innerText = (e && e.message) ? e.message : String(e);
+      })
+      .getFuelLists_IT();
+  }
+
+  function renderLists(){
+    const selC = document.getElementById("selectComm");
+    selC.innerHTML = "";
+    commAll.forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=v; selC.appendChild(o); });
+
+    const selF = document.getElementById("selectFam");
+    selF.innerHTML = "";
+    famAll.forEach(v => { const o=document.createElement("option"); o.value=v; o.textContent=v; selF.appendChild(o); });
+
+    filterComm();
+    filterFam();
+  }
+
+  function filterSelect(selectEl, allValues, searchValue){
+    const s = normText(searchValue);
+    selectEl.innerHTML = "";
+    allValues.forEach(v => {
+      if (!s || normText(v).includes(s)) {
+        const opt = document.createElement("option");
+        opt.value = v; opt.textContent = v;
+        selectEl.appendChild(opt);
+      }
+    });
+  }
+
+  function filterComm(){
+    filterSelect(document.getElementById("selectComm"), commAll, document.getElementById("searchComm").value);
+    const sel = document.getElementById("selectComm");
+    if (sel.options.length) { sel.selectedIndex = 0; onPickComm(); }
+  }
+
+  function filterFam(){
+    filterSelect(document.getElementById("selectFam"), famAll, document.getElementById("searchFam").value);
+    const sel = document.getElementById("selectFam");
+    if (sel.options.length) { sel.selectedIndex = 0; onPickFam(); }
+  }
+
+  function onPickComm(){ document.getElementById("carburante_key").value = document.getElementById("selectComm").value || ""; }
+  function onPickFam(){ document.getElementById("carburante_key").value = document.getElementById("selectFam").value || ""; }
+
+  function getGPS(){
+    document.getElementById("gpsErr").innerText = "";
+    document.getElementById("gpsInfo").innerText = "Richiesta posizione...";
+    document.getElementById("gpsAddr").innerText = "Indirizzo: —";
+
+    if (!navigator.geolocation){
+      document.getElementById("gpsErr").innerText = "Geolocalizzazione non supportata.";
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
+
+        document.getElementById("lat0").value = String(lat);
+        document.getElementById("lon0").value = String(lon);
+        document.getElementById("acc_m").value = String(acc);
+
+        document.getElementById("gpsInfo").innerText =
+          `OK: lat ${lat.toFixed(6)}, lon ${lon.toFixed(6)} (±${Math.round(acc)}m)`;
+
+        if (acc > ACC_MAX_TO_USE_M){
+          document.getElementById("gpsErr").innerText =
+            `Posizione troppo imprecisa (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`;
+        }
+
+        google.script.run
+          .withSuccessHandler((r) => {
+            window.__gpsMeta = r || { localita:"", provincia:"", regione:"", formatted:"" };
+            document.getElementById("gpsAddr").innerText = "Indirizzo: " + (r.formatted || "—");
+          })
+          .withFailureHandler(() => {
+            document.getElementById("gpsAddr").innerText = "Indirizzo: (non disponibile)";
+          })
+          .reverseGeocode_IT(lat, lon);
+      },
+      (err) => {
+        document.getElementById("gpsErr").innerText = "GPS negato/non disponibile: " + err.message;
+        document.getElementById("gpsInfo").innerText = "Nessuna posizione.";
+      },
+      { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+    );
+  }
+
+  function renderResults(res){
+    document.getElementById("resultsCard").classList.remove("hidden");
+    const box = document.getElementById("results");
+    box.innerHTML = "";
+
+    const meta = [];
+    if (res?.auth?.unlimited) meta.push("Accesso: UNLIMITED ✅");
+    else if (res?.auth?.trial_left !== undefined && res?.auth?.trial_left !== null) meta.push("Trial left: " + res.auth.trial_left);
+    if (res?.bench?.scope) meta.push("Benchmark: " + res.bench.scope + " (avg " + Number(res.bench.price||0).toFixed(3) + ")");
+    document.getElementById("metaLine").innerText = meta.join(" • ");
+
+    if (!res || !res.results || res.results.length === 0){
+      box.innerHTML = "<div class='muted'>Nessun risultato.</div>";
+      return;
+    }
+
+    // fallback carburante selezionato (se backend non lo manda)
+    const selectedFuel = document.getElementById("carburante_key").value || "";
+
+    res.results.forEach(r => {
+      const div = document.createElement("div");
+      div.className = "result";
+
+      const prezzoPill = `<span class="pill">${Number(r.prezzo).toFixed(3)} €/L</span>`;
+      const distPill   = `<span class="pill">Distanza ${Number(r.distanza_km).toFixed(2)} km</span>`;
+
+      const netKm = (r.net_km_extra !== null && r.net_km_extra !== undefined && r.net_km_extra !== "" && isFinite(Number(r.net_km_extra)))
+        ? `<span class="pill">Percorri +${Number(r.net_km_extra).toFixed(1)} km</span>`
+        : "";
+
+      const saving = (r.saving_euro !== null && r.saving_euro !== undefined && r.saving_euro !== "" && isFinite(Number(r.saving_euro)))
+        ? `<span class="pill">Saving rifornimento ${Number(r.saving_euro).toFixed(2)}€</span>`
+        : "";
+
+      const bandieraLine = r.bandiera
+        ? `<span style="font-weight:700;">${r.bandiera}</span>`
+        : "";
+
+      const carbName = (r.carburante && String(r.carburante).trim()) ? String(r.carburante).trim() : selectedFuel;
+      const carbLine = carbName ? `<span style="margin-left:10px;">${carbName}</span>` : "";
+
+      const tipoLine = r.gestore_short
+        ? `<div class="muted" style="margin-top:2px;"><b>Tipo impianto:</b> ${r.gestore_short}</div>`
+        : "";
+
+      // ✅ QUI: indirizzo + località + provincia_sigla
+      const loc = (r.localita && String(r.localita).trim()) ? String(r.localita).trim() : "";
+      const sigla = (r.provincia_sigla && String(r.provincia_sigla).trim()) ? String(r.provincia_sigla).trim() : "";
+      const locSuffix = loc ? (" — " + loc + (sigla ? " (" + sigla + ")" : "")) : (sigla ? (" (" + sigla + ")") : "");
+
+      div.innerHTML = `
+        <!-- Riga 1: rank + bandiera + carburante -->
+        <div style="display:flex; gap:10px; align-items:baseline;">
+          <div style="font-weight:700;">#${r.rank}</div>
+          <div style="flex:1;">
+            ${bandieraLine}${carbLine}
+          </div>
+        </div>
+
+        <!-- Riga 2: indirizzo + località (sigla provincia) -->
+        <div style="margin-top:4px;">${r.indirizzo || ""}${locSuffix}</div>
+
+        <!-- Riga 3: tipo impianto -->
+        ${tipoLine}
+
+        <!-- KPI row -->
+        <div style="margin-top:8px;">
+          ${prezzoPill}
+          ${distPill}
+          ${netKm}
+          ${saving}
+        </div>
+
+        <!-- Costi (small) -->
+        <div class="muted" style="margin-top:6px;">
+          Totale: <b>${Number(r.costo_totale).toFixed(2)}€</b> (tragitto ${Number(r.costo_tragitto).toFixed(2)}€)
+        </div>
+
+        <!-- Navigazione -->
+        <div class="row" style="margin-top:8px;">
+          <a href="${r.nav_google}" target="_blank" rel="noopener"><button>Naviga (Maps)</button></a>
+          <a href="${r.nav_waze}" target="_blank" rel="noopener"><button>Naviga (Waze)</button></a>
+        </div>
+      `;
+      box.appendChild(div);
+    });
+  }
+
+  function submit(){
+    document.getElementById("error").innerText = "";
+    document.getElementById("status").innerText = "Calcolo in corso...";
+
+    const email = document.getElementById("email").value.trim();
+    if (!email) { document.getElementById("error").innerText="Inserisci email."; document.getElementById("status").innerText=""; return; }
+
+    const country = document.getElementById("country").value;
+    const radius_km = Number(document.getElementById("radius_km").value || 10);
+
+    const carburante_mode = document.getElementById("carburante_mode").value;
+    const carburante_key  = document.getElementById("carburante_key").value.trim();
+    if (!carburante_key){ document.getElementById("error").innerText="Seleziona carburante."; document.getElementById("status").innerText=""; return; }
+
+    const locMode = document.getElementById("loc_mode").value;
+
+    let lat0 = null, lon0 = null, addrPayload = null;
+
+    if (locMode === "GPS") {
+      lat0 = Number(document.getElementById("lat0").value);
+      lon0 = Number(document.getElementById("lon0").value);
+      const acc = Number(document.getElementById("acc_m").value || 999999);
+
+      if (!isFinite(lat0) || !isFinite(lon0)) {
+        document.getElementById("error").innerText="Premi “Rileva posizione” oppure usa “Scrivi indirizzo”.";
+        document.getElementById("status").innerText=""; return;
+      }
+      if (acc > ACC_MAX_TO_USE_M) {
+        document.getElementById("error").innerText = `GPS troppo impreciso (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`;
+        document.getElementById("status").innerText=""; return;
+      }
+    } else {
+      const a = document.getElementById("addr").value.trim();
+      const cap = document.getElementById("cap").value.trim();
+      const city = document.getElementById("city").value.trim();
+      if (!a && !city) {
+        document.getElementById("addrErr").innerText = "Inserisci almeno Località o Indirizzo.";
+        document.getElementById("status").innerText=""; return;
+      }
+      document.getElementById("addrErr").innerText = "";
+      addrPayload = { addr: a, cap, city };
+    }
+
+    const benchmark_scope = document.getElementById("benchmark_scope").value;
+
+    const payload = {
+      email,
+      country,
+      radius_km,
+      loc_mode: locMode,
+      lat0, lon0,
+      address: addrPayload,
+      gps_meta: window.__gpsMeta || { localita:"", provincia:"", regione:"", formatted:"" },
+
+      carburante_mode,
+      carburante_key,
+
+      modalita_rifornimento: mode,
+      importo_euro: mode==="SPESA_FISSA" ? Number(document.getElementById("importo_euro").value) : null,
+      capacita_serbatoio: mode==="PIENO" ? Number(document.getElementById("capacita_serbatoio").value) : null,
+      km_residui: mode==="PIENO" ? Number(document.getElementById("km_residui").value) : null,
+      consumo_l_100km: mode==="PIENO" ? Number(document.getElementById("consumo_l_100km").value || 6.5) : 6.5,
+
+      benchmark_scope
+    };
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        document.getElementById("status").innerText = "";
+        renderResults(res);
+      })
+      .withFailureHandler((e) => {
+        document.getElementById("status").innerText = "";
+        document.getElementById("error").innerText = (e && e.message) ? e.message : String(e);
+      })
+      .submitWizard(payload);
+  }
+</script>
+</body>
+</html>
