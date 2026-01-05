@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: Arial, sans-serif; padding: 14px; }
@@ -178,16 +177,14 @@
   </div>
 
 <script>
-  // === BACKEND API (Apps Script Web App) ===
+  // ✅ METTI QUI IL TUO /exec
   const API_BASE = "https://script.google.com/macros/s/AKfycbwxdaZgyn2do5rCTsfo-8Ocb6NGpqBMkRnFWffQQq4EO9JY_2CmzkyCKB-cvpHSluUK/exec";
 
   const ACC_MAX_TO_USE_M = 500;
-
   let mode = "SPESA_FISSA";
   let fuelMode = "COMMERCIALE";
   let commAll = [];
   let famAll = [];
-
   window.__gpsMeta = { localita:"", provincia:"", regione:"", formatted:"" };
 
   function normText(v){
@@ -247,40 +244,43 @@
     });
   }
 
-  async function apiGet_(params){
-    const url = API_BASE + "?" + new URLSearchParams(params).toString();
-    const r = await fetch(url, { method: "GET" });
-    const j = await r.json();
+  async function apiGet_(url){
+    const r = await fetch(url, { method:"GET" });
+    const txt = await r.text();
+    let j;
+    try { j = JSON.parse(txt); } catch { throw new Error("Risposta non JSON: " + txt.slice(0,200)); }
+    if (!r.ok) throw new Error("HTTP " + r.status + ": " + (j.error || txt));
     if (j && j.error) throw new Error(j.error);
     return j;
   }
 
-  async function apiPost_(payload){
-    const r = await fetch(API_BASE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+  async function apiPost_(url, bodyObj){
+    const r = await fetch(url, {
+      method:"POST",
+      headers: { "Content-Type":"text/plain;charset=utf-8" }, // evita preflight CORS
+      body: JSON.stringify(bodyObj)
     });
-    const j = await r.json();
+    const txt = await r.text();
+    let j;
+    try { j = JSON.parse(txt); } catch { throw new Error("Risposta non JSON: " + txt.slice(0,200)); }
+    if (!r.ok) throw new Error("HTTP " + r.status + ": " + (j.error || txt));
     if (j && j.error) throw new Error(j.error);
     return j;
   }
 
-  function loadFuelLists(){
-    document.getElementById("fuelErr").innerText = "Carico carburanti...";
-
-    apiGet_({ action: "fuelListsIT" })
-      .then((res) => {
-        commAll = res?.commercial || [];
-        famAll  = res?.family || [];
-        document.getElementById("fuelErr").innerText = "";
-        renderLists();
-        const sel = document.getElementById("selectComm");
-        if (sel.options.length) { sel.selectedIndex=0; onPickComm(); }
-      })
-      .catch((e) => {
-        document.getElementById("fuelErr").innerText = (e && e.message) ? e.message : String(e);
-      });
+  async function loadFuelLists(){
+    try {
+      document.getElementById("fuelErr").innerText = "Carico carburanti...";
+      const res = await apiGet_(API_BASE + "?action=fuelListsIT");
+      commAll = res?.commercial || [];
+      famAll  = res?.family || [];
+      document.getElementById("fuelErr").innerText = "";
+      renderLists();
+      const sel = document.getElementById("selectComm");
+      if (sel.options.length) { sel.selectedIndex=0; onPickComm(); }
+    } catch (e) {
+      document.getElementById("fuelErr").innerText = e.message || String(e);
+    }
   }
 
   function renderLists(){
@@ -323,7 +323,7 @@
   function onPickComm(){ document.getElementById("carburante_key").value = document.getElementById("selectComm").value || ""; }
   function onPickFam(){ document.getElementById("carburante_key").value = document.getElementById("selectFam").value || ""; }
 
-  function getGPS(){
+  async function getGPS(){
     document.getElementById("gpsErr").innerText = "";
     document.getElementById("gpsInfo").innerText = "Richiesta posizione...";
     document.getElementById("gpsAddr").innerText = "Indirizzo: —";
@@ -334,30 +334,28 @@
     }
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
+      async (pos) => {
+        try {
+          const lat = pos.coords.latitude, lon = pos.coords.longitude, acc = pos.coords.accuracy;
 
-        document.getElementById("lat0").value = String(lat);
-        document.getElementById("lon0").value = String(lon);
-        document.getElementById("acc_m").value = String(acc);
+          document.getElementById("lat0").value = String(lat);
+          document.getElementById("lon0").value = String(lon);
+          document.getElementById("acc_m").value = String(acc);
 
-        document.getElementById("gpsInfo").innerText =
-          `OK: lat ${lat.toFixed(6)}, lon ${lon.toFixed(6)} (±${Math.round(acc)}m)`;
+          document.getElementById("gpsInfo").innerText =
+            `OK: lat ${lat.toFixed(6)}, lon ${lon.toFixed(6)} (±${Math.round(acc)}m)`;
 
-        if (acc > ACC_MAX_TO_USE_M){
-          document.getElementById("gpsErr").innerText =
-            `Posizione troppo imprecisa (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`;
-          return; // STOP: non facciamo reverse geocode su dato impreciso
+          if (acc > ACC_MAX_TO_USE_M){
+            document.getElementById("gpsErr").innerText =
+              `Posizione troppo imprecisa (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`;
+          }
+
+          const r = await apiGet_(API_BASE + `?action=reverseGeocodeIT&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+          window.__gpsMeta = r || { localita:"", provincia:"", regione:"", formatted:"" };
+          document.getElementById("gpsAddr").innerText = "Indirizzo: " + (r.formatted || "—");
+        } catch (e) {
+          document.getElementById("gpsAddr").innerText = "Indirizzo: (non disponibile)";
         }
-
-        apiGet_({ action:"reverseGeocodeIT", lat:String(lat), lon:String(lon) })
-          .then((r) => {
-            window.__gpsMeta = r || { localita:"", provincia:"", regione:"", formatted:"" };
-            document.getElementById("gpsAddr").innerText = "Indirizzo: " + (r.formatted || "—");
-          })
-          .catch(() => {
-            document.getElementById("gpsAddr").innerText = "Indirizzo: (non disponibile)";
-          });
       },
       (err) => {
         document.getElementById("gpsErr").innerText = "GPS negato/non disponibile: " + err.message;
@@ -447,81 +445,71 @@
     });
   }
 
-  function submit(){
+  async function submit(){
     document.getElementById("error").innerText = "";
     document.getElementById("status").innerText = "Calcolo in corso...";
 
-    const email = document.getElementById("email").value.trim();
-    if (!email) { document.getElementById("error").innerText="Inserisci email."; document.getElementById("status").innerText=""; return; }
+    try {
+      const email = document.getElementById("email").value.trim();
+      if (!email) throw new Error("Inserisci email.");
 
-    const country = document.getElementById("country").value;
-    const radius_km = Number(document.getElementById("radius_km").value || 10);
+      const country = document.getElementById("country").value;
+      const radius_km = Number(document.getElementById("radius_km").value || 10);
 
-    const carburante_mode = document.getElementById("carburante_mode").value;
-    const carburante_key  = document.getElementById("carburante_key").value.trim();
-    if (!carburante_key){ document.getElementById("error").innerText="Seleziona carburante."; document.getElementById("status").innerText=""; return; }
+      const carburante_mode = document.getElementById("carburante_mode").value;
+      const carburante_key  = document.getElementById("carburante_key").value.trim();
+      if (!carburante_key) throw new Error("Seleziona carburante.");
 
-    const locMode = document.getElementById("loc_mode").value;
+      const locMode = document.getElementById("loc_mode").value;
 
-    let lat0 = null, lon0 = null, addrPayload = null;
+      let lat0 = null, lon0 = null, addrPayload = null;
 
-    if (locMode === "GPS") {
-      lat0 = Number(document.getElementById("lat0").value);
-      lon0 = Number(document.getElementById("lon0").value);
-      const acc = Number(document.getElementById("acc_m").value || 999999);
+      if (locMode === "GPS") {
+        lat0 = Number(document.getElementById("lat0").value);
+        lon0 = Number(document.getElementById("lon0").value);
+        const acc = Number(document.getElementById("acc_m").value || 999999);
 
-      if (!isFinite(lat0) || !isFinite(lon0)) {
-        document.getElementById("error").innerText="Premi “Rileva posizione” oppure usa “Scrivi indirizzo”.";
-        document.getElementById("status").innerText=""; return;
+        if (!isFinite(lat0) || !isFinite(lon0)) throw new Error("Premi “Rileva posizione” oppure usa “Scrivi indirizzo”.");
+        if (acc > ACC_MAX_TO_USE_M) throw new Error(`GPS troppo impreciso (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`);
+      } else {
+        const a = document.getElementById("addr").value.trim();
+        const cap = document.getElementById("cap").value.trim();
+        const city = document.getElementById("city").value.trim();
+        if (!a && !city) throw new Error("Inserisci almeno Località o Indirizzo.");
+        addrPayload = { addr: a, cap, city };
       }
-      if (acc > ACC_MAX_TO_USE_M) {
-        document.getElementById("error").innerText = `GPS troppo impreciso (±${Math.round(acc)}m). Usa “Scrivi indirizzo”.`;
-        document.getElementById("status").innerText=""; return;
-      }
-    } else {
-      const a = document.getElementById("addr").value.trim();
-      const cap = document.getElementById("cap").value.trim();
-      const city = document.getElementById("city").value.trim();
-      if (!a && !city) {
-        document.getElementById("addrErr").innerText = "Inserisci almeno Località o Indirizzo.";
-        document.getElementById("status").innerText=""; return;
-      }
-      document.getElementById("addrErr").innerText = "";
-      addrPayload = { addr: a, cap, city };
+
+      const benchmark_scope = document.getElementById("benchmark_scope").value;
+
+      const payload = {
+        email,
+        country,
+        radius_km,
+        loc_mode: locMode,
+        lat0, lon0,
+        address: addrPayload,
+        gps_meta: window.__gpsMeta || { localita:"", provincia:"", regione:"", formatted:"" },
+
+        carburante_mode,
+        carburante_key,
+
+        modalita_rifornimento: mode,
+        importo_euro: mode==="SPESA_FISSA" ? Number(document.getElementById("importo_euro").value) : null,
+        capacita_serbatoio: mode==="PIENO" ? Number(document.getElementById("capacita_serbatoio").value) : null,
+        km_residui: mode==="PIENO" ? Number(document.getElementById("km_residui").value) : null,
+        consumo_l_100km: mode==="PIENO" ? Number(document.getElementById("consumo_l_100km").value || 6.5) : 6.5,
+
+        benchmark_scope
+      };
+
+      const res = await apiPost_(API_BASE, { action:"submitWizard", payload });
+      document.getElementById("status").innerText = "";
+      renderResults(res);
+
+    } catch (e) {
+      document.getElementById("status").innerText = "";
+      document.getElementById("error").innerText = e.message || String(e);
     }
-
-    const benchmark_scope = document.getElementById("benchmark_scope").value;
-
-    const payload = {
-      email,
-      country,
-      radius_km,
-      loc_mode: locMode,
-      lat0, lon0,
-      address: addrPayload,
-      gps_meta: window.__gpsMeta || { localita:"", provincia:"", regione:"", formatted:"" },
-
-      carburante_mode,
-      carburante_key,
-
-      modalita_rifornimento: mode,
-      importo_euro: mode==="SPESA_FISSA" ? Number(document.getElementById("importo_euro").value) : null,
-      capacita_serbatoio: mode==="PIENO" ? Number(document.getElementById("capacita_serbatoio").value) : null,
-      km_residui: mode==="PIENO" ? Number(document.getElementById("km_residui").value) : null,
-      consumo_l_100km: mode==="PIENO" ? Number(document.getElementById("consumo_l_100km").value || 6.5) : 6.5,
-
-      benchmark_scope
-    };
-
-    apiPost_({ action: "submitWizard", payload })
-      .then((res) => {
-        document.getElementById("status").innerText = "";
-        renderResults(res);
-      })
-      .catch((e) => {
-        document.getElementById("status").innerText = "";
-        document.getElementById("error").innerText = (e && e.message) ? e.message : String(e);
-      });
   }
 </script>
 </body>
